@@ -6,9 +6,9 @@ reference: https://github.com/weiaicunzai/blender_shapenet_render
 
 g_num_views = 12
 
-g_mesh_dataset_path = 'data/datasets/modelnet/modelnet40_manually_aligned'
-g_preprocessed_dataset_path = 'data/datasets/modelnet/modelnet40_manually_aligned_preprocessed'
-g_imgs_dataset_path = 'data/datasets/modelnet/modelnet40_manually_aligned_imgs'
+g_mesh_dataset_path = 'examples/modelnet_aligned'
+g_preprocessed_dataset_path = 'examples/modelnet_aligned_processed'
+g_imgs_dataset_path = 'examples/modelnet_aligned_imgs'
 
 g_blender_excutable_path = '/home/vencia/blender-2.79b-linux-glibc219-x86_64/blender'
 
