@@ -4,11 +4,11 @@
 reference: https://github.com/weiaicunzai/blender_shapenet_render
 """
 
-g_n_views = 12
+g_num_views = 12
 
-g_mesh_dataset_path = 'data/datasets/modelnet/test'
-g_preprocessed_dataset_path = 'data/datasets/modelnet/test_preprocessed'
-g_imgs_dataset_path = 'data/datasets/modelnet/test_imgs'
+g_mesh_dataset_path = 'data/datasets/modelnet/modelnet40_manually_aligned'
+g_preprocessed_dataset_path = 'data/datasets/modelnet/modelnet40_manually_aligned_preprocessed'
+g_imgs_dataset_path = 'data/datasets/modelnet/modelnet40_manually_aligned_imgs'
 
 g_blender_excutable_path = '/home/vencia/blender-2.79b-linux-glibc219-x86_64/blender'
 

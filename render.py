@@ -4,31 +4,33 @@ import numpy as np
 import glob
 from pathlib import Path
 import math
-import random
+import sys
 from settings import *
 
 
 def main():
     init_all()
 
-    for sample_path in glob.glob(g_preprocessed_dataset_path + '/**/*.obj', recursive=True):
+    for sample_path in sorted(glob.glob(g_preprocessed_dataset_path + '/**/*.obj', recursive=True)):
         sample_id = Path(sample_path).stem
-        print(sample_id)
         output_dir = str(
             g_imgs_dataset_path / Path(sample_path).parent.relative_to(g_preprocessed_dataset_path) / sample_id)
-        os.makedirs(output_dir, exist_ok=True)
+        if os.path.isdir(output_dir) and len([x for x in os.listdir(output_dir) if x.endswith('.png')]) == g_num_views:
+            continue
 
+        print(sample_id, '...')
+        os.makedirs(output_dir, exist_ok=True)
         clear_mesh()
         bpy.ops.import_scene.obj(filepath=sample_path)
         img_file_output_node = bpy.context.scene.node_tree.nodes[4]
         img_file_output_node.base_path = output_dir
 
-        azimuths = np.linspace(0, 2 * np.pi, g_n_views, endpoint=False)
+        azimuths = np.linspace(0, 2 * np.pi, g_num_views, endpoint=False)
         elevation = np.pi / 4
         distance = math.sqrt(3) * 0.8
         tilt = 0.0
 
-        for view_id in range(g_n_views):
+        for view_id in range(g_num_views):
             azimuth = azimuths[view_id]
             cam_loc = camera_location(azimuth, elevation, distance)
             cam_rot = camera_rot_XYZEuler(azimuth, elevation, tilt)
