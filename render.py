@@ -14,7 +14,8 @@ def main():
     for sample_path in sorted(glob.glob(g_preprocessed_dataset_path + '/**/*.obj', recursive=True)):
         sample_id = Path(sample_path).stem
         output_dir = str(
-            g_imgs_dataset_path / Path(sample_path).parent.relative_to(g_preprocessed_dataset_path) / sample_id)
+            (g_imgs_dataset_path + '_' + g_camera_setting) / Path(sample_path).parent.relative_to(
+                g_preprocessed_dataset_path) / sample_id)
         if os.path.isdir(output_dir) and len([x for x in os.listdir(output_dir) if x.endswith('.png')]) == g_num_views:
             continue
 
@@ -25,13 +26,19 @@ def main():
         img_file_output_node = bpy.context.scene.node_tree.nodes[4]
         img_file_output_node.base_path = output_dir
 
-        azimuths = np.linspace(0, 2 * np.pi, g_num_views, endpoint=False)
-        elevation = np.pi / 4
-        distance = math.sqrt(3) * 0.8
+        circumradius = math.sqrt(3)
+        distance = circumradius * 0.8
         tilt = 0.0
+        if g_camera_setting == 'aligned':  # elevated circle of cameras
+            azimuths = np.linspace(0, 2 * np.pi, g_num_views, endpoint=False)
+            elevations = np.full(g_num_views, fill_value=np.pi / 4)
+        else:
+            assert g_camera_setting == 'unaligned'
+            azimuths, elevations = _dodecahedron(circumradius)
 
         for view_id in range(g_num_views):
             azimuth = azimuths[view_id]
+            elevation = elevations[view_id]
             cam_loc = camera_location(azimuth, elevation, distance)
             cam_rot = camera_rot_XYZEuler(azimuth, elevation, tilt)
             bpy.context.scene.frame_set(view_id + 1)
@@ -132,13 +139,47 @@ def camera_setting_init():
 
 
 def light_setting_init():
-    lamp_data = bpy.data.lamps.new(name="New Lamp", type='HEMI')
-    lamp_data.energy = 0.1
-    lamp_object = bpy.data.objects.new(name="New Lamp", object_data=lamp_data)
+    default_lamp = bpy.data.lamps[0]
+    default_lamp.energy = 0.0
+    # default_lamp_object = bpy.data.objects[default_lamp.name]
+    # default_lamp_object.location = (0, 0, 10)
+    # print(default_lamp_object.location)
+
+    # world = bpy.data.worlds['World']
+    # world.use_nodes = True
+    # bg = world.node_tree.nodes['Background']
+    # bg.inputs[1].default_value = 10.0
+
+    lamp_data = bpy.data.lamps.new(name='l1', type='POINT')
+    lamp_data.energy = 1.5
+    lamp_object = bpy.data.objects.new(name='l1', object_data=lamp_data)
     bpy.context.scene.objects.link(lamp_object)
-    lamp_object.location = (0, 0, 0)
-    lamp_object.select = True
-    bpy.context.scene.objects.active = lamp_object
+    lamp_object.location = (0, 0, 10)
+    lamp_data = bpy.data.lamps.new(name='l2', type='POINT')
+    lamp_data.energy = 1.5
+    lamp_object = bpy.data.objects.new(name='l2', object_data=lamp_data)
+    bpy.context.scene.objects.link(lamp_object)
+    lamp_object.location = (0, 0, -10)
+    lamp_data = bpy.data.lamps.new(name='l3', type='POINT')
+    lamp_data.energy = 0.2
+    lamp_object = bpy.data.objects.new(name='l3', object_data=lamp_data)
+    bpy.context.scene.objects.link(lamp_object)
+    lamp_object.location = (0, 10, 0)
+    lamp_data = bpy.data.lamps.new(name='l4', type='POINT')
+    lamp_data.energy = 0.2
+    lamp_object = bpy.data.objects.new(name='l4', object_data=lamp_data)
+    bpy.context.scene.objects.link(lamp_object)
+    lamp_object.location = (0, -10, 0)
+    lamp_data = bpy.data.lamps.new(name='l5', type='POINT')
+    lamp_data.energy = 0.2
+    lamp_object = bpy.data.objects.new(name='l5', object_data=lamp_data)
+    bpy.context.scene.objects.link(lamp_object)
+    lamp_object.location = (10, 0, 0)
+    lamp_data = bpy.data.lamps.new(name='l6', type='POINT')
+    lamp_data.energy = 0.2
+    lamp_object = bpy.data.objects.new(name='l6', object_data=lamp_data)
+    bpy.context.scene.objects.link(lamp_object)
+    lamp_object.location = (-10, 0, 0)
 
 
 def init_all():
@@ -199,6 +240,34 @@ def camera_rot_XYZEuler(azimuth, elevation, tilt):
     z = z + azimuth
 
     return x, y, z
+
+
+def _dodecahedron(circumradius):
+    # https://github.com/yinyunie/depth_renderer
+    phi = (1 + math.sqrt(5)) / 2.  # golden_ratio
+    dodecahedron = [[-1, -1, -1],
+                    [1, -1, -1],
+                    [1, 1, -1],
+                    [-1, 1, -1],
+                    [-1, -1, 1],
+                    [1, -1, 1],
+                    [1, 1, 1],
+                    [-1, 1, 1],
+                    [0, -phi, -1 / phi],
+                    [0, -phi, 1 / phi],
+                    [0, phi, -1 / phi],
+                    [0, phi, 1 / phi],
+                    [-1 / phi, 0, -phi],
+                    [-1 / phi, 0, phi],
+                    [1 / phi, 0, -phi],
+                    [1 / phi, 0, phi],
+                    [-phi, -1 / phi, 0],
+                    [-phi, 1 / phi, 0],
+                    [phi, -1 / phi, 0],
+                    [phi, 1 / phi, 0]]
+    elevations = [math.asin(x[2] / circumradius) for x in dodecahedron]
+    azimuths = [math.atan2(x[1], x[0]) for x in dodecahedron]
+    return azimuths, elevations
 
 
 if __name__ == '__main__':

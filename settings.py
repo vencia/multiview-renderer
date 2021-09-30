@@ -3,15 +3,14 @@
 
 reference: https://github.com/weiaicunzai/blender_shapenet_render
 """
-
-g_num_views = 12
-
-g_mesh_dataset_path = 'examples/modelnet_aligned'
-g_preprocessed_dataset_path = 'examples/modelnet_aligned_processed'
-g_imgs_dataset_path = 'examples/modelnet_aligned_imgs'
-
 g_blender_excutable_path = '/home/vencia/blender-2.79b-linux-glibc219-x86_64/blender'
 
+g_mesh_dataset_path = 'data/datasets/dmunet/STL_dataset'  # 'examples/modelnet_aligned'
+g_preprocessed_dataset_path = g_mesh_dataset_path + '_preprocessed'
+g_imgs_dataset_path = g_mesh_dataset_path + '_imgs'
+
+g_camera_setting = 'unaligned'  # aligned
+g_num_views = 12 if g_camera_setting == 'aligned' else 20
 g_fit_camera_to_view = True
 
 # background image composite
