@@ -11,8 +11,9 @@ parser.add_argument('--mesh_dir', type=str, default='data/datasets/dmunet/STL_da
 parser.add_argument('--render_dir', type=str, default='data/datasets/dmunet/STL_dataset_test_imgs')
 parser.add_argument('--num_views', type=int, default=20, choices=[12, 20],
                     help='number of views to be rendered')
-parser.add_argument('--fit_view', type=bool, default=True,
+parser.add_argument('--fit_view', type=bool, default=False,
                     help='Remove double vertices to improve mesh quality.')
+parser.add_argument('--scale', type=float, default=1)
 parser.add_argument('--color_depth', type=str, default='8',
                     help='Number of bit per channel used for output. Either 8 or 16.')
 parser.add_argument('--format', type=str, default='PNG',
@@ -35,9 +36,10 @@ def main():
     for sample_path in sorted(mesh_dir.rglob('**/*.obj')):
         sample_id = sample_path.stem
         output_folder = render_dir / sample_path.parent.relative_to(mesh_dir) / sample_id
-        # if os.path.isdir(output_folder) and len(
-        #         [x for x in os.listdir(output_folder) if x.endswith('.png')]) == args.num_views:
-        #     continue
+        if os.path.isdir(output_folder) and len(
+                [x for x in os.listdir(output_folder) if x.endswith('.png')]) == args.num_views:
+            print(f'{sample_id} already exists, skip.')
+            continue
 
         print(sample_id, '...')
         os.makedirs(output_folder, exist_ok=True)
@@ -57,9 +59,9 @@ def main():
             node = slot.material.node_tree.nodes['Principled BSDF']
             node.inputs['Specular'].default_value = 0.05
 
-        # if args.scale != 1:
-        #     bpy.ops.transform.resize(value=(args.scale, args.scale, args.scale))
-        #     bpy.ops.object.transform_apply(scale=True)
+        if args.scale != 1:
+            bpy.ops.transform.resize(value=(args.scale, args.scale, args.scale))
+            bpy.ops.object.transform_apply(scale=True)
 
         # Set objekt IDs
         obj.pass_index = 1
@@ -87,12 +89,23 @@ def main():
 
 def render(cam_loc, cam_rot):
     cam_obj = bpy.context.scene.objects['Camera']
+    # cam_obj.rotation_mode = 'XYZ'
     cam_obj.location = cam_loc
     cam_obj.rotation_euler = cam_rot
+    cam_obj.data.lens = 35
+    cam_obj.data.sensor_width = 32
+    #
+    # cam_constraint = cam_obj.constraints.new(type='TRACK_TO')
+    # cam_constraint.track_axis = 'TRACK_NEGATIVE_Z'
+    # cam_constraint.up_axis = 'UP_Y'
 
     # start rendering
     if args.fit_view:
         bpy.ops.view3d.camera_to_view_selected()
+
+    # bpy.ops.transform.resize(value=(0.5, 0.5, 0.5))
+    # bpy.ops.object.transform_apply(scale=True)
+
     bpy.ops.render.render(write_still=True)
 
 
@@ -152,54 +165,22 @@ def init_all():
     bpy.context.active_object.select_set(True)
     bpy.ops.object.delete()
 
-    # bpy.ops.object.light_add(type='POINT')
-    # lamp_data = bpy.data.lights['POINT']
-    # lamp_data.energy = 1.5
-    # lamp_object = bpy.data.objects.new(name='l1', object_data=lamp_data)
-    # # bpy.context.scene.objects.link(lamp_object)
-    # lamp_object.location = (0, 0, 10)
-    # lamp_data = bpy.ops.object.light_add(name='l2', type='POINT')
-    # lamp_data.energy = 1.5
-    # lamp_object = bpy.data.objects.new(name='l2', object_data=lamp_data)
-    # # bpy.context.scene.objects.link(lamp_object)
-    # lamp_object.location = (0, 0, -10)
-    # lamp_data = bpy.ops.object.light_add(name='l3', type='POINT')
-    # lamp_data.energy = 0.2
-    # lamp_object = bpy.data.objects.new(name='l3', object_data=lamp_data)
-    # bpy.context.scene.objects.link(lamp_object)
-    # lamp_object.location = (0, 10, 0)
-    # lamp_data = bpy.ops.object.light_add(name='l4', type='POINT')
-    # lamp_data.energy = 0.2
-    # lamp_object = bpy.data.objects.new(name='l4', object_data=lamp_data)
-    # bpy.context.scene.objects.link(lamp_object)
-    # lamp_object.location = (0, -10, 0)
-    # lamp_data = bpy.ops.object.light_add(name='l5', type='POINT')
-    # lamp_data.energy = 0.2
-    # lamp_object = bpy.data.objects.new(name='l5', object_data=lamp_data)
-    # bpy.context.scene.objects.link(lamp_object)
-    # lamp_object.location = (10, 0, 0)
-    # lamp_data = bpy.ops.object.light_add(name='l6', type='POINT')
-    # lamp_data.energy = 0.2
-    # lamp_object = bpy.data.objects.new(name='l6', object_data=lamp_data)
-    # bpy.context.scene.objects.link(lamp_object)
-    # lamp_object.location = (-10, 0, 0)
-
     # Make light just directional, disable shadows.
     light = bpy.data.lights['Light']
     light.type = 'SUN'
     light.use_shadow = False
     # Possibly disable specular shading:
-    light.specular_factor = 1.0
-    light.energy = 2.0
+    light.specular_factor = 0.0
+    light.energy = 5.0
 
     # Add another light source so stuff facing away from light is not completely dark
     bpy.ops.object.light_add(type='SUN')
     light2 = bpy.data.lights['Sun']
     light2.use_shadow = False
-    light2.specular_factor = 1.0
-    light2.energy = 2.0  # 0.015
+    light2.specular_factor = 0.0
+    light2.energy = 5.0  # 0.015
     bpy.data.objects['Sun'].rotation_euler = bpy.data.objects['Light'].rotation_euler
-    bpy.data.objects['Sun'].rotation_euler[0] += 180
+    bpy.data.objects['Sun'].rotation_euler[0] = 180
 
 
 def camera_location(azimuth, elevation, dist):
