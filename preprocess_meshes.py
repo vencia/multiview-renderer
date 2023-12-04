@@ -4,20 +4,22 @@ import trimesh
 import numpy as np
 from pathlib import Path
 import meshio
-from settings import g_mesh_dataset_path, g_preprocessed_dataset_path
+
+mesh_dir = Path('data/datasets/dmunet/STL_dataset')
+preprocessed_dir = Path('data/datasets/dmunet/STL_dataset_preprocessed')
 
 
 def main():
-    for sample_path in sorted(glob.glob(g_mesh_dataset_path + '/**/*.stl', recursive=True)):
-        sample_id = Path(sample_path).stem
-        output_dir = g_preprocessed_dataset_path / Path(sample_path).parent.relative_to(g_mesh_dataset_path)
+    for mesh_path in sorted(mesh_dir.glob('**/*.stl'))[:10]:
+        sample_id = mesh_path.stem
+        output_dir = preprocessed_dir / mesh_path.parent.relative_to(mesh_dir)
         os.makedirs(str(output_dir), exist_ok=True)
         output_path = str(output_dir / (sample_id + '.obj'))
         if os.path.exists(output_path):
             continue
 
         print(sample_id, '...')
-        mesh = trimesh.load(sample_path)
+        mesh = trimesh.load(mesh_path)
         # mesh = load_from_vtk(sample_path)
         scale = (mesh.bounds[1] - mesh.bounds[0]).max()
         center = (mesh.bounds[1] + mesh.bounds[0]) / 2

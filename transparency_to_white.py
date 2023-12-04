@@ -4,8 +4,8 @@ from pathlib import Path
 import argparse
 
 parser = argparse.ArgumentParser()
-parser.add_argument('--render_dir', type=str, default='data/datasets/dmunet/STL_dataset_test_imgs')
-parser.add_argument('--output_dir', type=str, default='data/datasets/dmunet/STL_dataset_imgs_white')
+parser.add_argument('--render_dir', type=str, default='data/datasets/dmunet/test_imgs_new')
+parser.add_argument('--output_dir', type=str, default='data/datasets/dmunet/test_imgs_new_white')
 args = parser.parse_args()
 
 render_dir = Path(args.render_dir)

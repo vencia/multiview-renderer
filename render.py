@@ -8,23 +8,25 @@ import sys
 
 parser = argparse.ArgumentParser(description='Renders given folder of obj meshes.')
 parser.add_argument('--mesh_dir', type=str, default='data/datasets/dmunet/STL_dataset_preprocessed')
-parser.add_argument('--render_dir', type=str, default='data/datasets/dmunet/STL_dataset_test_imgs')
+parser.add_argument('--render_dir', type=str, default='data/datasets/dmunet/test_imgs_new')
 parser.add_argument('--num_views', type=int, default=20, choices=[12, 20],
                     help='number of views to be rendered')
-parser.add_argument('--fit_view', type=bool, default=False,
-                    help='Remove double vertices to improve mesh quality.')
+parser.add_argument('--overwrite', type=bool, default=True)
+parser.add_argument('--fit_view', type=bool, default=False)
 parser.add_argument('--scale', type=float, default=1)
 parser.add_argument('--color_depth', type=str, default='8',
                     help='Number of bit per channel used for output. Either 8 or 16.')
 parser.add_argument('--format', type=str, default='PNG',
                     help='Format of files generated. Either PNG or OPEN_EXR')
-parser.add_argument('--resolution', type=int, default=224,
-                    help='Resolution of the images.')
+parser.add_argument('--resolution', type=int, default=224 * 2)  # 224
 parser.add_argument('--engine', type=str, default='BLENDER_EEVEE',
                     help='Blender internal engine for rendering. E.g. CYCLES, BLENDER_EEVEE, ...')
 
 argv = sys.argv[sys.argv.index("--") + 1:]
 args = parser.parse_args(argv)
+
+scene = bpy.context.scene
+camera = scene.camera
 
 
 def main():
@@ -36,7 +38,7 @@ def main():
     for sample_path in sorted(mesh_dir.rglob('**/*.obj')):
         sample_id = sample_path.stem
         output_folder = render_dir / sample_path.parent.relative_to(mesh_dir) / sample_id
-        if os.path.isdir(output_folder) and len(
+        if not args.overwrite and os.path.isdir(output_folder) and len(
                 [x for x in os.listdir(output_folder) if x.endswith('.png')]) == args.num_views:
             print(f'{sample_id} already exists, skip.')
             continue
@@ -46,18 +48,10 @@ def main():
 
         clear_mesh()
 
-        # # Import textured mesh
-        # bpy.ops.object.select_all(action='DESELECT')
-
         bpy.ops.import_scene.obj(filepath=str(sample_path))
 
         obj = bpy.context.selected_objects[0]
         bpy.context.view_layer.objects.active = obj
-
-        # Possibly disable specular shading
-        for slot in obj.material_slots:
-            node = slot.material.node_tree.nodes['Principled BSDF']
-            node.inputs['Specular'].default_value = 0.05
 
         if args.scale != 1:
             bpy.ops.transform.resize(value=(args.scale, args.scale, args.scale))
@@ -82,29 +76,37 @@ def main():
             elevation = elevations[view_id]
             cam_loc = camera_location(azimuth, elevation, distance)
             cam_rot = camera_rot_XYZEuler(azimuth, elevation, tilt)
-            bpy.context.scene.frame_set(view_id + 1)
-            bpy.context.scene.render.filepath = str(output_folder / f'{sample_id}_{view_id:03d}.png')
-            render(cam_loc, cam_rot)
+            scene.frame_set(view_id + 1)
+            scene.render.filepath = str(output_folder / f'{sample_id}_{view_id:03d}.png')
+            render_with_cam(cam_loc, cam_rot, obj, output_folder / f'{sample_id}_{view_id:03d}')
 
 
-def render(cam_loc, cam_rot):
-    cam_obj = bpy.context.scene.objects['Camera']
-    # cam_obj.rotation_mode = 'XYZ'
-    cam_obj.location = cam_loc
-    cam_obj.rotation_euler = cam_rot
-    cam_obj.data.lens = 35
-    cam_obj.data.sensor_width = 32
+def render_with_cam(cam_loc, cam_rot, obj, output_path):
+    # cam_obj = scene.objects['Camera']
+    camera.location = cam_loc
+    camera.rotation_euler = cam_rot
+    camera.data.lens = 35
+    camera.data.sensor_width = 32
     #
     # cam_constraint = cam_obj.constraints.new(type='TRACK_TO')
     # cam_constraint.track_axis = 'TRACK_NEGATIVE_Z'
     # cam_constraint.up_axis = 'UP_Y'
 
-    # start rendering
     if args.fit_view:
         bpy.ops.view3d.camera_to_view_selected()
 
-    # bpy.ops.transform.resize(value=(0.5, 0.5, 0.5))
-    # bpy.ops.object.transform_apply(scale=True)
+    assert scene.render.resolution_percentage == 100
+
+    projection_matrix = get_projection_matrix()
+    inverted_world_matrix = get_inverted_world_matrix()
+    np.save(f'{output_path}_projection_matrix.npy', projection_matrix)
+    np.save(f'{output_path}_inverted_world_matrix.npy', inverted_world_matrix)
+
+    # coords_2d = project_with_matrix(obj)
+    # coords_2d[:, 1] = 1 - coords_2d[:, 1]  # flip y axis
+    # coords_2d *= res  # scale from [0,1] to image size
+    # coords_2d = np.stack((coords_2d[:, 1], coords_2d[:, 0]), axis=-1)  # switch x and y
+    # np.save(f'{output_path}_vertices_to_pixels.npy', coords_2d)
 
     bpy.ops.render.render(write_still=True)
 
@@ -137,22 +139,22 @@ def clear_mesh():
 
 
 def init_all():
-    bpy.context.scene.render.engine = args.engine
-    bpy.context.scene.render.image_settings.color_mode = 'RGBA'  # ('RGB', 'RGBA', ...)
-    bpy.context.scene.render.image_settings.color_depth = args.color_depth  # ('8', '16')
-    bpy.context.scene.render.image_settings.file_format = args.format  # ('PNG', 'OPEN_EXR', 'JPEG, ...)
-    bpy.context.scene.render.resolution_x = args.resolution
-    bpy.context.scene.render.resolution_y = args.resolution
-    bpy.context.scene.render.resolution_percentage = 100
-    bpy.context.scene.render.film_transparent = True
+    scene.render.engine = args.engine
+    scene.render.image_settings.color_mode = 'RGBA'  # ('RGB', 'RGBA', ...)
+    scene.render.image_settings.color_depth = args.color_depth  # ('8', '16')
+    scene.render.image_settings.file_format = args.format  # ('PNG', 'OPEN_EXR', 'JPEG, ...)
+    scene.render.resolution_x = args.resolution
+    scene.render.resolution_y = args.resolution
+    scene.render.resolution_percentage = 100
+    scene.render.film_transparent = True
 
-    bpy.context.scene.use_nodes = True
-    # bpy.context.scene.view_layers["View Layer"].use_pass_normal = True
-    # bpy.context.scene.view_layers["View Layer"].use_pass_diffuse_color = True
-    # bpy.context.scene.view_layers["View Layer"].use_pass_object_index = True
+    scene.use_nodes = True
+    # scene.view_layers["View Layer"].use_pass_normal = True
+    # scene.view_layers["View Layer"].use_pass_diffuse_color = True
+    # scene.view_layers["View Layer"].use_pass_object_index = True
 
-    nodes = bpy.context.scene.node_tree.nodes
-    links = bpy.context.scene.node_tree.links
+    nodes = scene.node_tree.nodes
+    links = scene.node_tree.links
 
     # Clear default nodes
     for n in nodes:
@@ -259,6 +261,40 @@ def _dodecahedron(circumradius):
     elevations = [math.asin(x[2] / circumradius) for x in dodecahedron]
     azimuths = [math.atan2(x[1], x[0]) for x in dodecahedron]
     return azimuths, elevations
+
+
+def get_projection_matrix():
+    width, height = scene.render.resolution_x, scene.render.resolution_y
+    projection_matrix = camera.calc_matrix_camera(bpy.context.evaluated_depsgraph_get(), x=width, y=height)
+    return np.asarray(projection_matrix)
+
+
+def get_inverted_world_matrix():
+    inverted_world_matrix = camera.matrix_world.inverted()
+    return np.asarray(inverted_world_matrix)
+
+
+def project_with_matrix(obj):
+    width, height = scene.render.resolution_x, scene.render.resolution_y
+    projection_matrix = camera.calc_matrix_camera(bpy.context.evaluated_depsgraph_get(), x=width, y=height)
+    projection_matrix = np.array([list(row) for row in projection_matrix])
+
+    # vertices in camera space
+    verts_camspace = np.array([list(camera.matrix_world.inverted() @ v.co) for v in obj.data.vertices])
+
+    # Homogenize
+    verts_camspace_h = np.hstack([verts_camspace, np.ones((len(verts_camspace), 1))])
+
+    # Project
+    projected = verts_camspace_h.dot(projection_matrix.T)
+
+    # Dehomogenize
+    projected = projected[:, :2] / projected[:, 3, None]
+
+    # [-1, 1] to [0, 1]
+    projected = (projected + 1.0) / 2.0
+
+    return projected
 
 
 if __name__ == '__main__':
