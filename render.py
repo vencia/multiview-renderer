@@ -270,8 +270,8 @@ def get_projection_matrix():
 
 
 def get_inverted_world_matrix():
-    inverted_world_matrix = camera.matrix_world.inverted()
-    return np.asarray(inverted_world_matrix)
+    view_matrix = camera.matrix_world.inverted()
+    return np.asarray(view_matrix)
 
 
 def project_with_matrix(obj):
