@@ -10,6 +10,7 @@
 
 import argparse, sys, os, math, re
 import bpy
+import numpy as np
 from glob import glob
 
 parser = argparse.ArgumentParser(description='Renders given obj file by rotation a camera around it.')
@@ -54,6 +55,7 @@ render.resolution_percentage = 100
 render.film_transparent = True
 
 scene.use_nodes = True
+scene.view_layers["View Layer"].use_pass_z = True
 scene.view_layers["View Layer"].use_pass_normal = True
 scene.view_layers["View Layer"].use_pass_diffuse_color = True
 scene.view_layers["View Layer"].use_pass_object_index = True
@@ -146,6 +148,12 @@ else:
     links.new(render_layers.outputs['IndexOB'], divide_node.inputs[0])
     links.new(divide_node.outputs[0], id_file_output.inputs[0])
 
+# create output node
+v = nodes.new('CompositorNodeViewer')
+v.use_alpha = False
+# links.new(render_layers.outputs[0], v.inputs[0])  # link Image to Viewer Image RGB
+links.new(render_layers.outputs['Depth'], v.inputs[0])  # link Z to output
+
 # Delete default cube
 context.active_object.select_set(True)
 bpy.ops.object.delete()
@@ -231,6 +239,16 @@ for i in range(0, args.views):
     id_file_output.file_slots[0].path = render_file_path + "_id"
 
     bpy.ops.render.render(write_still=True)  # render still
+
+    # get viewer pixels
+    depth_img = bpy.data.images['Viewer Node'].pixels
+    arr = np.copy(np.array(depth_img))
+    print('pixels', depth_img)
+    # copy buffer to numpy array for faster manipulation
+    # arr = np.array(pixels[:])
+    assert (arr> 0).any()
+    print('depth array', arr)
+    np.save(render_file_path + '_depth.npy', arr)
 
     cam_empty.rotation_euler[2] += math.radians(stepsize)
 

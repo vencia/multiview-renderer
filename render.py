@@ -9,16 +9,18 @@ import sys
 parser = argparse.ArgumentParser(description='Renders given folder of obj meshes.')
 parser.add_argument('--mesh_dir', type=str, default='data/datasets/dmunet/STL_dataset_preprocessed')
 parser.add_argument('--render_dir', type=str, default='data/datasets/dmunet/test_imgs_new')
-parser.add_argument('--num_views', type=int, default=20, choices=[12, 20],
+parser.add_argument('--num_views', type=int, default=12, choices=[12, 20],
                     help='number of views to be rendered')
 parser.add_argument('--overwrite', type=bool, default=True)
 parser.add_argument('--fit_view', type=bool, default=False)
 parser.add_argument('--scale', type=float, default=1)
+parser.add_argument('--depth_scale', type=float, default=1.4,
+                    help='Scaling that is applied to depth. Depends on size of mesh. Try out various values until you get a good result. Ignored if format is OPEN_EXR.')
 parser.add_argument('--color_depth', type=str, default='8',
                     help='Number of bit per channel used for output. Either 8 or 16.')
 parser.add_argument('--format', type=str, default='PNG',
                     help='Format of files generated. Either PNG or OPEN_EXR')
-parser.add_argument('--resolution', type=int, default=224 * 2)  # 224
+parser.add_argument('--resolution', type=int, default=224)  # 224
 parser.add_argument('--engine', type=str, default='BLENDER_EEVEE',
                     help='Blender internal engine for rendering. E.g. CYCLES, BLENDER_EEVEE, ...')
 
@@ -77,8 +79,34 @@ def main():
             cam_loc = camera_location(azimuth, elevation, distance)
             cam_rot = camera_rot_XYZEuler(azimuth, elevation, tilt)
             scene.frame_set(view_id + 1)
-            scene.render.filepath = str(output_folder / f'{sample_id}_{view_id:03d}.png')
-            render_with_cam(cam_loc, cam_rot, obj, output_folder / f'{sample_id}_{view_id:03d}')
+            scene.render.filepath = str(output_folder / f'{sample_id}_{view_id + 1:03d}')
+            scene.node_tree.nodes['File Output'].file_slots[0].path = str(output_folder / f'{sample_id}_###_depth')
+
+            render_with_cam(cam_loc, cam_rot, obj, output_folder / f'{sample_id}_{view_id + 1:03d}')
+
+            # get viewer pixels
+            depth_values = bpy.data.images['Viewer Node'].pixels
+            depth_values = np.copy(np.array(depth_values))
+            depth_values = depth_values.reshape(args.resolution, args.resolution, -1)[:, :, 0]
+            np.save(output_folder / f'{sample_id}_{view_id + 1:03d}_depth.npy', depth_values)
+
+            sensor_width = bpy.context.scene.camera.data.sensor_width / 1000.0
+            sensor_height = sensor_width * 1.0
+            px_size = sensor_width / args.resolution
+
+            # Create grid with real world positions for each pixel
+            img_coord = (np.indices(depth_values.shape).astype(np.float32) + 0.5) * px_size
+            img_coord[0] -= sensor_height / 2.0
+            img_coord[1] -= sensor_width / 2.0
+
+            # Extend the 2D pixel position grid in 3rd dimension. The camera center is in the origin.
+            # All pixels lie on the plane at z = focal length.
+            f = bpy.context.scene.camera.data.lens / 1000.0
+            img_coord = np.concatenate((img_coord, np.ones(depth_values.shape)[np.newaxis, ...] * f))
+
+            # Calculate transformed depth values
+            z_values = f * depth_values / np.linalg.norm(img_coord, axis=0)
+            np.save(output_folder / f'{sample_id}_{view_id + 1:03d}_z.npy', z_values)
 
 
 def render_with_cam(cam_loc, cam_rot, obj, output_path):
@@ -87,20 +115,18 @@ def render_with_cam(cam_loc, cam_rot, obj, output_path):
     camera.rotation_euler = cam_rot
     camera.data.lens = 35
     camera.data.sensor_width = 32
-    #
-    # cam_constraint = cam_obj.constraints.new(type='TRACK_TO')
-    # cam_constraint.track_axis = 'TRACK_NEGATIVE_Z'
-    # cam_constraint.up_axis = 'UP_Y'
+
+    cam_constraint = camera.constraints.new(type='TRACK_TO')
+    cam_constraint.track_axis = 'TRACK_NEGATIVE_Z'
+    cam_constraint.up_axis = 'UP_Y'
 
     if args.fit_view:
         bpy.ops.view3d.camera_to_view_selected()
 
-    assert scene.render.resolution_percentage == 100
-
     projection_matrix = get_projection_matrix()
-    inverted_world_matrix = get_inverted_world_matrix()
+    view_matrix = get_view_matrix()
     np.save(f'{output_path}_projection_matrix.npy', projection_matrix)
-    np.save(f'{output_path}_inverted_world_matrix.npy', inverted_world_matrix)
+    np.save(f'{output_path}_view_matrix.npy', view_matrix)
 
     # coords_2d = project_with_matrix(obj)
     # coords_2d[:, 1] = 1 - coords_2d[:, 1]  # flip y axis
@@ -148,7 +174,11 @@ def init_all():
     scene.render.resolution_percentage = 100
     scene.render.film_transparent = True
 
+    scene.render.use_compositing = True
     scene.use_nodes = True
+    scene.view_layers["View Layer"].use_pass_z = True
+    scene.view_layers[0].use_pass_z = True
+
     # scene.view_layers["View Layer"].use_pass_normal = True
     # scene.view_layers["View Layer"].use_pass_diffuse_color = True
     # scene.view_layers["View Layer"].use_pass_object_index = True
@@ -162,6 +192,41 @@ def init_all():
 
     # Create input render layer node
     render_layers = nodes.new('CompositorNodeRLayers')
+
+    # Create depth output nodes
+    depth_file_output = nodes.new(type="CompositorNodeOutputFile")
+    depth_file_output.label = 'Depth Output'
+    depth_file_output.base_path = ''
+    depth_file_output.file_slots[0].use_node_format = True
+    depth_file_output.format.file_format = args.format
+    depth_file_output.format.color_depth = args.color_depth
+    if args.format == 'OPEN_EXR':
+        links.new(render_layers.outputs['Depth'], depth_file_output.inputs[0])
+    else:
+        depth_file_output.format.color_mode = "BW"
+
+        # Remap as other types can not represent the full range of depth.
+        map = nodes.new(type="CompositorNodeMapValue")
+        # Size is chosen kind of arbitrarily, try out until you're satisfied with resulting depth map.
+        map.offset = [-1]
+        map.size = [args.depth_scale]
+        map.use_min = True
+        map.min = [0]
+
+        links.new(render_layers.outputs['Depth'], map.inputs[0])
+        links.new(map.outputs[0], depth_file_output.inputs[0])
+
+    # create output node
+    v = nodes.new('CompositorNodeViewer')
+    v.use_alpha = False
+    # links.new(render_layers.outputs[0], v.inputs[0])  # link Image to Viewer Image RGB
+    links.new(render_layers.outputs['Depth'], v.inputs[0])  # link Z to output
+
+    # # create output node
+    # v = nodes.new('CompositorNodeViewer')
+    # v.use_alpha = True
+    # links.new(render_layers.outputs[0], v.inputs[0])  # link Image to Viewer Image RGB
+    # links.new(render_layers.outputs['Depth'], v.inputs[1])  # link Z to output
 
     # Delete default cube
     bpy.context.active_object.select_set(True)
@@ -269,7 +334,7 @@ def get_projection_matrix():
     return np.asarray(projection_matrix)
 
 
-def get_inverted_world_matrix():
+def get_view_matrix():
     view_matrix = camera.matrix_world.inverted()
     return np.asarray(view_matrix)
 
