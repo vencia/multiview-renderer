@@ -3,6 +3,7 @@ import numpy as np
 from PIL import Image
 from pathlib import Path
 import trimesh
+import math
 from utils_points import plot_points
 
 resolution = 224
@@ -23,19 +24,28 @@ def main():
         projection_matrix = np.load(img_path.parent / f'{sample_id}_projection_matrix.npy')
         view_matrix = np.load(img_path.parent / f'{sample_id}_view_matrix.npy')
         depth_values = np.load(img_path.parent / f'{sample_id}_depth.npy')
-        z_values = np.load(img_path.parent / f'{sample_id}_z.npy')
+        # projected_pc = np.load(img_path.parent / f'{sample_id}_projected_pointcloud.npy')
+        camera_data = np.load(img_path.parent / f'{sample_id}_camera_data.npz')
 
-        non_background_depth_values = depth_values[depth_values < 1000]
-        non_background_z_values = z_values[z_values < 1000]
-        print('exported depth range', non_background_depth_values.min(), 'to', non_background_depth_values.max())
-        print('exported z range', non_background_z_values.min(), 'to', non_background_z_values.max())
+        projected_pc = point_cloud(depth_values, camera_data)
+        projected_pc = projected_pc.reshape(-1, 3)
+        projected_pc = projected_pc[np.isnan(projected_pc[:, -1]) == False]
 
-        mesh = trimesh.load(mesh_dir / img_path.parent.parent.stem / f'{img_path.parent.stem}.obj')
+        projected_pc_path = projected_img_dir / img_path.relative_to(img_dir).with_suffix('.vtk')
+        os.makedirs(projected_pc_path.parent, exist_ok=True)
+        plot_points(projected_pc_path, projected_pc)
 
-        # pixel_point_map = np.full((resolution, resolution, 4), np.nan)
-        points = mesh.sample(1000)
-        pixel_positions, z_depth = points_to_pixels(points, projection_matrix, view_matrix)
-        print('projected depth range', z_depth.min(), 'to', z_depth.max())
+        # non_background_depth_values = depth_values[depth_values < 1000]
+        # non_background_z_values = z_values[z_values < 1000]
+        # print('exported depth range', non_background_depth_values.min(), 'to', non_background_depth_values.max())
+        # print('exported z range', non_background_z_values.min(), 'to', non_background_z_values.max())
+
+        # mesh = trimesh.load(mesh_dir / img_path.parent.parent.stem / f'{img_path.parent.stem}.obj')
+        #
+        # # pixel_point_map = np.full((resolution, resolution, 4), np.nan)
+        # points = mesh.sample(1000)
+        # pixel_positions, z_depth = points_to_pixels(points, projection_matrix, view_matrix)
+        # print('projected depth range', z_depth.min(), 'to', z_depth.max())
 
         # for i, pixel in enumerate(pixel_positions):
         #     if np.isnan(pixel_point_map[tuple(pixel)][-1]) or z_depth[i] < pixel_point_map[tuple(pixel)][-1]:
@@ -60,15 +70,15 @@ def main():
         # os.makedirs(new_img_path.parent, exist_ok=True)
         # new_image.save(new_img_path)
 
-        pixels = np.asarray([[resolution / 2, resolution / 2]]).astype(int)
-        depths = np.asarray([depth_values[tuple(x)] for x in pixels])
-        mid_point = pixels_to_points(pixels, depths, projection_matrix, view_matrix)
-        mesh.vertices = np.concatenate((mesh.vertices, mid_point), 0)
-        mesh.faces = np.concatenate(
-            (mesh.faces, [(len(mesh.vertices) - 1, len(mesh.vertices) - 2, len(mesh.vertices) - 3)]), 0)
-        new_mesh_path = projected_img_dir / img_path.relative_to(img_dir).with_suffix('.stl')
-        os.makedirs(new_mesh_path.parent, exist_ok=True)
-        mesh.export(new_mesh_path)
+        # pixels = np.asarray([[resolution / 2, resolution / 2]]).astype(int)
+        # depths = np.asarray([depth_values[tuple(x)] for x in pixels])
+        # mid_point = pixels_to_points(pixels, depths, projection_matrix, view_matrix)
+        # mesh.vertices = np.concatenate((mesh.vertices, mid_point), 0)
+        # mesh.faces = np.concatenate(
+        #     (mesh.faces, [(len(mesh.vertices) - 1, len(mesh.vertices) - 2, len(mesh.vertices) - 3)]), 0)
+        # new_mesh_path = projected_img_dir / img_path.relative_to(img_dir).with_suffix('.stl')
+        # os.makedirs(new_mesh_path.parent, exist_ok=True)
+        # mesh.export(new_mesh_path)
 
 
 def transparency_to_white(image):
@@ -109,6 +119,28 @@ def pixels_to_points(pixel_positions, depths, projection_matrix, view_matrix):
     projected = np.asarray([pixel_to_point_matrix(projection_matrix, view_matrix) @ x for x in projected])
     projected = projected[:, :-1] / projected[:, -1]  # dehomogenize
     return projected
+
+
+def point_cloud(depth, camera_data):
+    # Distance factor from the cameral focal angle
+    factor = 2.0 * math.tan(camera_data['angle_x'] / 2.0)
+
+    rows, cols = depth.shape
+    c, r = np.meshgrid(np.arange(cols), np.arange(rows), sparse=True)
+
+    # Valid depths are defined by the camera clipping planes
+    valid = (depth > camera_data['clip_start']) & (depth < camera_data['clip_end'])
+
+    # Negate Z (the camera Z is at the opposite)
+    z = -np.where(valid, depth, np.nan)
+
+    # Mirror X
+    # Center c and r relatively to the image size cols and rows
+    ratio = max(rows, cols)
+    x = -np.where(valid, factor * z * (c - (cols / 2)) / ratio, 0)
+    y = np.where(valid, factor * z * (r - (rows / 2)) / ratio, 0)
+
+    return np.dstack((x, y, z))
 
 
 if __name__ == '__main__':

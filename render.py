@@ -5,6 +5,7 @@ from pathlib import Path
 import math
 import argparse
 import sys
+from mathutils import Vector
 
 parser = argparse.ArgumentParser(description='Renders given folder of obj meshes.')
 parser.add_argument('--mesh_dir', type=str, default='data/datasets/dmunet/STL_dataset_preprocessed')
@@ -73,7 +74,7 @@ def main():
         else:
             assert False
 
-        for view_id in range(args.num_views):
+        for view_id in range(args.num_views)[:1]:
             azimuth = azimuths[view_id]
             elevation = elevations[view_id]
             cam_loc = camera_location(azimuth, elevation, distance)
@@ -90,23 +91,22 @@ def main():
             depth_values = depth_values.reshape(args.resolution, args.resolution, -1)[:, :, 0]
             np.save(output_folder / f'{sample_id}_{view_id + 1:03d}_depth.npy', depth_values)
 
-            sensor_width = bpy.context.scene.camera.data.sensor_width / 1000.0
-            sensor_height = sensor_width * 1.0
-            px_size = sensor_width / args.resolution
+            np.savez(output_folder / f'{sample_id}_{view_id + 1:03d}_camera_data.npz', **get_camera_data())
 
-            # Create grid with real world positions for each pixel
-            img_coord = (np.indices(depth_values.shape).astype(np.float32) + 0.5) * px_size
-            img_coord[0] -= sensor_height / 2.0
-            img_coord[1] -= sensor_width / 2.0
+            # Calculate the points
+            points = point_cloud(depth_values)
+            np.save(output_folder / f'{sample_id}_{view_id + 1:03d}_pixels_to_points.npy', points)
 
-            # Extend the 2D pixel position grid in 3rd dimension. The camera center is in the origin.
-            # All pixels lie on the plane at z = focal length.
-            f = bpy.context.scene.camera.data.lens / 1000.0
-            img_coord = np.concatenate((img_coord, np.ones(depth_values.shape)[np.newaxis, ...] * f))
-
-            # Calculate transformed depth values
-            z_values = f * depth_values / np.linalg.norm(img_coord, axis=0)
-            np.save(output_folder / f'{sample_id}_{view_id + 1:03d}_z.npy', z_values)
+            # # ----------- show projected point cloud in scene -------------
+            # # Translate the points
+            # verts = [camera.matrix_world @ Vector(p) for r in points for p in r]
+            # # Create a mesh from the points
+            # mesh_data = bpy.data.meshes.new("result")
+            # mesh_data.from_pydata(verts, [], [])
+            # mesh_data.update()
+            # # Create an object with this mesh
+            # obj = bpy.data.objects.new("result", mesh_data)
+            # scene.collection.objects.link(obj)
 
 
 def render_with_cam(cam_loc, cam_rot, obj, output_path):
@@ -339,27 +339,55 @@ def get_view_matrix():
     return np.asarray(view_matrix)
 
 
-def project_with_matrix(obj):
-    width, height = scene.render.resolution_x, scene.render.resolution_y
-    projection_matrix = camera.calc_matrix_camera(bpy.context.evaluated_depsgraph_get(), x=width, y=height)
-    projection_matrix = np.array([list(row) for row in projection_matrix])
+def get_camera_data():
+    return {'clip_start': camera.data.clip_start,
+            'clip_end': camera.data.clip_end,
+            'angle_x': camera.data.angle_x}
 
-    # vertices in camera space
-    verts_camspace = np.array([list(camera.matrix_world.inverted() @ v.co) for v in obj.data.vertices])
 
-    # Homogenize
-    verts_camspace_h = np.hstack([verts_camspace, np.ones((len(verts_camspace), 1))])
+# def project_with_matrix(obj):
+#     width, height = scene.render.resolution_x, scene.render.resolution_y
+#     projection_matrix = camera.calc_matrix_camera(bpy.context.evaluated_depsgraph_get(), x=width, y=height)
+#     projection_matrix = np.array([list(row) for row in projection_matrix])
+#
+#     # vertices in camera space
+#     verts_camspace = np.array([list(camera.matrix_world.inverted() @ v.co) for v in obj.data.vertices])
+#
+#     # Homogenize
+#     verts_camspace_h = np.hstack([verts_camspace, np.ones((len(verts_camspace), 1))])
+#
+#     # Project
+#     projected = verts_camspace_h.dot(projection_matrix.T)
+#
+#     # Dehomogenize
+#     projected = projected[:, :2] / projected[:, 3, None]
+#
+#     # [-1, 1] to [0, 1]
+#     projected = (projected + 1.0) / 2.0
+#
+#     return projected
 
-    # Project
-    projected = verts_camspace_h.dot(projection_matrix.T)
 
-    # Dehomogenize
-    projected = projected[:, :2] / projected[:, 3, None]
+def point_cloud(depth):
+    # Distance factor from the cameral focal angle
+    factor = 2.0 * math.tan(camera.data.angle_x / 2.0)
 
-    # [-1, 1] to [0, 1]
-    projected = (projected + 1.0) / 2.0
+    rows, cols = depth.shape
+    c, r = np.meshgrid(np.arange(cols), np.arange(rows), sparse=True)
 
-    return projected
+    # Valid depths are defined by the camera clipping planes
+    valid = (depth > camera.data.clip_start) & (depth < camera.data.clip_end)
+
+    # Negate Z (the camera Z is at the opposite)
+    z = -np.where(valid, depth, np.nan)
+
+    # Mirror X
+    # Center c and r relatively to the image size cols and rows
+    ratio = max(rows, cols)
+    x = -np.where(valid, factor * z * (c - (cols / 2)) / ratio, 0)
+    y = np.where(valid, factor * z * (r - (rows / 2)) / ratio, 0)
+
+    return np.dstack((x, y, z))
 
 
 if __name__ == '__main__':
