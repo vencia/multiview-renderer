@@ -1,20 +1,22 @@
 import bpy
+from mathutils import Vector
 import os
 import numpy as np
 from pathlib import Path
 import math
 import argparse
 import sys
-from mathutils import Vector
 
-parser = argparse.ArgumentParser(description='Renders given folder of obj meshes.')
-parser.add_argument('--mesh_dir', type=str, default='data/datasets/dmunet/STL_dataset_preprocessed')
-parser.add_argument('--render_dir', type=str, default='data/datasets/dmunet/test_imgs_new')
+parser = argparse.ArgumentParser(description='Renders given folder of stl/obj meshes.')
+parser.add_argument('--mesh_dir', type=str, default='data/datasets/dmunet/STL_dataset')
+parser.add_argument('--mesh_format', type=str, default='stl')
+parser.add_argument('--render_dir', type=str, default='data/datasets/dmunet/test_imgs_stl')
 parser.add_argument('--num_views', type=int, default=12, choices=[12, 20],
                     help='number of views to be rendered')
 parser.add_argument('--overwrite', type=bool, default=True)
-parser.add_argument('--fit_view', type=bool, default=False)
-parser.add_argument('--scale', type=float, default=1)
+# parser.add_argument('--fit_view', type=bool, default=False)
+# parser.add_argument('--scale', type=float, default=1)
+parser.add_argument('--normalize', type=bool, default=True, help='Normalize object dimensions to range [-0.5,0.5]')
 parser.add_argument('--depth_scale', type=float, default=1.4,
                     help='Scaling that is applied to depth. Depends on size of mesh. Try out various values until you get a good result. Ignored if format is OPEN_EXR.')
 parser.add_argument('--color_depth', type=str, default='8',
@@ -38,7 +40,7 @@ def main():
     mesh_dir = Path(args.mesh_dir)
     render_dir = Path(args.render_dir)
 
-    for sample_path in sorted(mesh_dir.rglob('**/*.obj')):
+    for sample_path in sorted(mesh_dir.rglob(f'**/*.{args.mesh_format}'))[:1]:
         sample_id = sample_path.stem
         output_folder = render_dir / sample_path.parent.relative_to(mesh_dir) / sample_id
         if not args.overwrite and os.path.isdir(output_folder) and len(
@@ -51,14 +53,26 @@ def main():
 
         clear_mesh()
 
-        bpy.ops.import_scene.obj(filepath=str(sample_path))
+        if args.mesh_format == 'obj':
+            bpy.ops.import_scene.obj(filepath=str(sample_path))
+        else:
+            assert args.mesh_format == 'stl'
+            bpy.ops.import_mesh.stl(filepath=str(sample_path))
 
         obj = bpy.context.selected_objects[0]
         bpy.context.view_layer.objects.active = obj
 
-        if args.scale != 1:
-            bpy.ops.transform.resize(value=(args.scale, args.scale, args.scale))
-            bpy.ops.object.transform_apply(scale=True)
+        # if args.scale != 1:
+        #     bpy.ops.transform.resize(value=(args.scale, args.scale, args.scale))
+        #     bpy.ops.object.transform_apply(scale=True)
+
+        if args.normalize:
+            dimensions = np.asarray(obj.dimensions)
+            bbox = np.asarray(obj.bound_box)
+            scale = 1 / dimensions.max()
+            center = (bbox.max(0) + bbox.min(0)) / 2.0
+            bpy.ops.transform.resize(value=(scale, scale, scale))
+            bpy.ops.transform.translate(value=(-center[0] * scale, -center[1] * scale, -center[2] * scale))
 
         # Set objekt IDs
         obj.pass_index = 1
@@ -74,30 +88,33 @@ def main():
         else:
             assert False
 
-        for view_id in range(args.num_views)[:1]:
+        for view_id in range(args.num_views)[1:2]:
             azimuth = azimuths[view_id]
             elevation = elevations[view_id]
             cam_loc = camera_location(azimuth, elevation, distance)
             cam_rot = camera_rot_XYZEuler(azimuth, elevation, tilt)
             scene.frame_set(view_id + 1)
-            scene.render.filepath = str(output_folder / f'{sample_id}_{view_id + 1:03d}')
+            render_path = str(output_folder / f'{sample_id}_{view_id + 1 :03d}')
+            scene.render.filepath = render_path
             scene.node_tree.nodes['File Output'].file_slots[0].path = str(output_folder / f'{sample_id}_###_depth')
 
-            render_with_cam(cam_loc, cam_rot, obj, output_folder / f'{sample_id}_{view_id + 1:03d}')
+            render_with_cam(cam_loc, cam_rot)
 
             # get viewer pixels
             depth_values = bpy.data.images['Viewer Node'].pixels
             depth_values = np.copy(np.array(depth_values))
             depth_values = depth_values.reshape(args.resolution, args.resolution, -1)[:, :, 0]
-            np.save(output_folder / f'{sample_id}_{view_id + 1:03d}_depth.npy', depth_values)
+            np.save(render_path + '_depth.npy', depth_values)
 
-            np.savez(output_folder / f'{sample_id}_{view_id + 1:03d}_camera_data.npz', **get_camera_data())
+            np.savez(render_path + '_camera_data.npz', **get_camera_data())
+            np.save(render_path + '_projection_matrix.npy', get_projection_matrix())
+            np.save(render_path + '_view_matrix.npy', get_view_matrix())
 
-            # Calculate the points
-            points = point_cloud(depth_values)
-            np.save(output_folder / f'{sample_id}_{view_id + 1:03d}_pixels_to_points.npy', points)
-
-            # # ----------- show projected point cloud in scene -------------
+            # # Calculate the points
+            # points = point_cloud(depth_values)
+            # # np.save(output_folder / f'{sample_id}_{view_id + 1:03d}_point_cloud.npy', points)
+            #
+            # # ----------- show point cloud in scene -------------
             # # Translate the points
             # verts = [camera.matrix_world @ Vector(p) for r in points for p in r]
             # # Create a mesh from the points
@@ -109,8 +126,7 @@ def main():
             # scene.collection.objects.link(obj)
 
 
-def render_with_cam(cam_loc, cam_rot, obj, output_path):
-    # cam_obj = scene.objects['Camera']
+def render_with_cam(cam_loc, cam_rot):
     camera.location = cam_loc
     camera.rotation_euler = cam_rot
     camera.data.lens = 35
@@ -120,19 +136,8 @@ def render_with_cam(cam_loc, cam_rot, obj, output_path):
     cam_constraint.track_axis = 'TRACK_NEGATIVE_Z'
     cam_constraint.up_axis = 'UP_Y'
 
-    if args.fit_view:
-        bpy.ops.view3d.camera_to_view_selected()
-
-    projection_matrix = get_projection_matrix()
-    view_matrix = get_view_matrix()
-    np.save(f'{output_path}_projection_matrix.npy', projection_matrix)
-    np.save(f'{output_path}_view_matrix.npy', view_matrix)
-
-    # coords_2d = project_with_matrix(obj)
-    # coords_2d[:, 1] = 1 - coords_2d[:, 1]  # flip y axis
-    # coords_2d *= res  # scale from [0,1] to image size
-    # coords_2d = np.stack((coords_2d[:, 1], coords_2d[:, 0]), axis=-1)  # switch x and y
-    # np.save(f'{output_path}_vertices_to_pixels.npy', coords_2d)
+    # if args.fit_view:
+    #     bpy.ops.view3d.camera_to_view_selected()
 
     bpy.ops.render.render(write_still=True)
 
@@ -221,12 +226,6 @@ def init_all():
     v.use_alpha = False
     # links.new(render_layers.outputs[0], v.inputs[0])  # link Image to Viewer Image RGB
     links.new(render_layers.outputs['Depth'], v.inputs[0])  # link Z to output
-
-    # # create output node
-    # v = nodes.new('CompositorNodeViewer')
-    # v.use_alpha = True
-    # links.new(render_layers.outputs[0], v.inputs[0])  # link Image to Viewer Image RGB
-    # links.new(render_layers.outputs['Depth'], v.inputs[1])  # link Z to output
 
     # Delete default cube
     bpy.context.active_object.select_set(True)
@@ -345,27 +344,27 @@ def get_camera_data():
             'angle_x': camera.data.angle_x}
 
 
-# def project_with_matrix(obj):
-#     width, height = scene.render.resolution_x, scene.render.resolution_y
-#     projection_matrix = camera.calc_matrix_camera(bpy.context.evaluated_depsgraph_get(), x=width, y=height)
-#     projection_matrix = np.array([list(row) for row in projection_matrix])
-#
-#     # vertices in camera space
-#     verts_camspace = np.array([list(camera.matrix_world.inverted() @ v.co) for v in obj.data.vertices])
-#
-#     # Homogenize
-#     verts_camspace_h = np.hstack([verts_camspace, np.ones((len(verts_camspace), 1))])
-#
-#     # Project
-#     projected = verts_camspace_h.dot(projection_matrix.T)
-#
-#     # Dehomogenize
-#     projected = projected[:, :2] / projected[:, 3, None]
-#
-#     # [-1, 1] to [0, 1]
-#     projected = (projected + 1.0) / 2.0
-#
-#     return projected
+def project_with_matrix(obj):
+    width, height = scene.render.resolution_x, scene.render.resolution_y
+    projection_matrix = camera.calc_matrix_camera(bpy.context.evaluated_depsgraph_get(), x=width, y=height)
+    projection_matrix = np.array([list(row) for row in projection_matrix])
+
+    # vertices in camera space
+    verts_camspace = np.array([list(camera.matrix_world.inverted() @ v.co) for v in obj.data.vertices])
+
+    # Homogenize
+    verts_camspace_h = np.hstack([verts_camspace, np.ones((len(verts_camspace), 1))])
+
+    # Project
+    projected = verts_camspace_h.dot(projection_matrix.T)
+
+    # Dehomogenize
+    projected = projected[:, :2] / projected[:, 3, None]
+
+    # [-1, 1] to [0, 1]
+    projected = (projected + 1.0) / 2.0
+
+    return projected
 
 
 def point_cloud(depth):
@@ -384,10 +383,10 @@ def point_cloud(depth):
     # Mirror X
     # Center c and r relatively to the image size cols and rows
     ratio = max(rows, cols)
-    x = -np.where(valid, factor * z * (c - (cols / 2)) / ratio, 0)
+    x = np.where(valid, factor * z * (c - (cols / 2)) / ratio, 0)
     y = np.where(valid, factor * z * (r - (rows / 2)) / ratio, 0)
 
-    return np.dstack((x, y, z))
+    return np.dstack((-x, -y, z))
 
 
 if __name__ == '__main__':

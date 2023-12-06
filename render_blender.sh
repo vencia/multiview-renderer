@@ -1,1 +1,0 @@
-/home/vencia/blender-2.93.0/blender  --python render_blender.py -- --views 10 --output_folder data/renderings data/datasets/dmunet/STL_dataset_preprocessed/Actuator/Actuator001.obj
