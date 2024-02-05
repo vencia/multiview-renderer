@@ -10,7 +10,7 @@ import argparse
 parser = argparse.ArgumentParser(
     description='Compute correspondence between 3d points and 2d pixels in both directions.')
 parser.add_argument('--render_dir', type=str, default='data/datasets/dmunet/STL_dataset_imgs')
-parser.add_argument('--correspondence_dir', type=str, default='data/datasets/dmunet/STL_dataset_imgs_correspondence')
+parser.add_argument('--correspondence_dir', type=str, default='data/datasets/dmunet/STL_dataset_imgs_correspondence_test')
 parser.add_argument('--pointcloud_dir', type=str, default='data/datasets/dmunet/points_with_normals')
 parser.add_argument('--overwrite', type=bool, default=True)
 parser.add_argument('--resolution', type=int, default=224)
@@ -33,17 +33,17 @@ def main():
             print(f'{sample_id} already exists, skip.')
             continue
 
-        # img = Image.open(img_path).convert("RGBA")
-        # new_img = img.copy()
-        # projection_matrix = np.load(img_path.parent / f'{sample_id}_projection_matrix.npy')
-        # view_matrix = np.load(img_path.parent / f'{sample_id}_view_matrix.npy')
-        # points = np.load(pc_dir / img_path.parent.parent.stem / f'{img_path.parent.stem}.npy')[:, :3]
-        # points = normalize(points)
-        # # points = np.stack((-points[:, 0], points[:, 2], points[:, 1]), -1)
-        # overlay_img = pointcloud_to_image(points, projection_matrix, view_matrix)
-        # new_img.paste(overlay_img, (0, 0), overlay_img)
-        # os.makedirs(projected_img_path.parent, exist_ok=True)
-        # new_img.save(projected_img_path)
+        img = Image.open(img_path).convert("RGBA")
+        new_img = img.copy()
+        projection_matrix = np.load(img_path.parent / f'{sample_id}_projection_matrix.npy')
+        view_matrix = np.load(img_path.parent / f'{sample_id}_view_matrix.npy')
+        points = np.load(pc_dir / img_path.parent.parent.stem / f'{img_path.parent.stem}.npy')[:, :3]
+        points = normalize(points)
+        # points = np.stack((-points[:, 0], points[:, 2], points[:, 1]), -1)
+        overlay_img = pointcloud_to_image(points, projection_matrix, view_matrix)
+        new_img.paste(overlay_img, (0, 0), overlay_img)
+        os.makedirs(projected_img_path.parent, exist_ok=True)
+        new_img.save(projected_img_path)
 
         depth = np.load(img_path.parent / f'{sample_id}_depth.npy')
         camera_data = np.load(img_path.parent / f'{sample_id}_camera_data.npz')

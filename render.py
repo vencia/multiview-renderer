@@ -10,13 +10,14 @@ import sys
 parser = argparse.ArgumentParser(description='Renders given folder of stl/obj meshes.')
 parser.add_argument('--mesh_dir', type=str, default='data/datasets/dmunet/STL_dataset')
 parser.add_argument('--mesh_format', type=str, default='stl')
-parser.add_argument('--render_dir', type=str, default='data/datasets/dmunet/STL_dataset_imgs')
+parser.add_argument('--render_dir', type=str, default='data/datasets/dmunet/STL_dataset_imgs_test')
 parser.add_argument('--num_views', type=int, default=20, choices=[12, 20],
                     help='number of views to be rendered')
-parser.add_argument('--overwrite', type=bool, default=True)
+parser.add_argument('--overwrite', type=bool, default=False)
 # parser.add_argument('--fit_view', type=bool, default=False)
 parser.add_argument('--scale', type=float, default=0.4)
 parser.add_argument('--normalize', type=bool, default=True, help='Normalize object dimensions to range [-0.5,0.5]')
+parser.add_argument('--render_depth', type=bool, default=False)
 parser.add_argument('--depth_scale', type=float, default=0.9,
                     help='Scaling that is applied to depth. Depends on size of mesh. Try out various values until you get a good result. Ignored if format is OPEN_EXR.')
 parser.add_argument('--color_depth', type=str, default='8',
@@ -40,7 +41,7 @@ def main():
     mesh_dir = Path(args.mesh_dir)
     render_dir = Path(args.render_dir)
 
-    for sample_path in sorted(mesh_dir.rglob(f'**/*.{args.mesh_format}'))[:1]:
+    for sample_path in sorted(mesh_dir.rglob(f'**/*.{args.mesh_format}')):
         sample_id = sample_path.stem
         output_folder = render_dir / sample_path.parent.relative_to(mesh_dir) / sample_id
         if not args.overwrite and os.path.isdir(output_folder) and len(
@@ -92,15 +93,17 @@ def main():
             scene.frame_set(view_id + 1)
             render_path = str(output_folder / f'{sample_id}_{view_id + 1 :03d}')
             scene.render.filepath = render_path
-            scene.node_tree.nodes['File Output'].file_slots[0].path = str(output_folder / f'{sample_id}_###_depth')
+            if args.render_depth:
+                scene.node_tree.nodes['File Output'].file_slots[0].path = str(output_folder / f'{sample_id}_###_depth')
 
             render_with_cam(cam_loc, cam_rot)
 
-            # get viewer pixels
-            depth_values = bpy.data.images['Viewer Node'].pixels
-            depth_values = np.copy(np.array(depth_values))
-            depth_values = depth_values.reshape(args.resolution, args.resolution, -1)[:, :, 0]
-            np.save(render_path + '_depth.npy', depth_values)
+            if args.render_depth:
+                # get viewer pixels
+                depth_values = bpy.data.images['Viewer Node'].pixels
+                depth_values = np.copy(np.array(depth_values))
+                depth_values = depth_values.reshape(args.resolution, args.resolution, -1)[:, :, 0]
+                np.save(render_path + '_depth.npy', depth_values)
 
             np.savez(render_path + '_camera_data.npz', **get_camera_data())
             np.save(render_path + '_projection_matrix.npy', get_projection_matrix())
@@ -195,34 +198,36 @@ def init_all():
     # Create input render layer node
     render_layers = nodes.new('CompositorNodeRLayers')
 
-    # Create depth output nodes
-    depth_file_output = nodes.new(type="CompositorNodeOutputFile")
-    depth_file_output.label = 'Depth Output'
-    depth_file_output.base_path = ''
-    depth_file_output.file_slots[0].use_node_format = True
-    depth_file_output.format.file_format = args.format
-    depth_file_output.format.color_depth = args.color_depth
-    if args.format == 'OPEN_EXR':
-        links.new(render_layers.outputs['Depth'], depth_file_output.inputs[0])
-    else:
-        depth_file_output.format.color_mode = "BW"
+    if args.render_depth:
 
-        # Remap as other types can not represent the full range of depth.
-        map = nodes.new(type="CompositorNodeMapValue")
-        # Size is chosen kind of arbitrarily, try out until you're satisfied with resulting depth map.
-        map.offset = [-1.0]
-        map.size = [args.depth_scale]
-        map.use_min = True
-        map.min = [0]
+        # Create depth output nodes
+        depth_file_output = nodes.new(type="CompositorNodeOutputFile")
+        depth_file_output.label = 'Depth Output'
+        depth_file_output.base_path = ''
+        depth_file_output.file_slots[0].use_node_format = True
+        depth_file_output.format.file_format = args.format
+        depth_file_output.format.color_depth = args.color_depth
+        if args.format == 'OPEN_EXR':
+            links.new(render_layers.outputs['Depth'], depth_file_output.inputs[0])
+        else:
+            depth_file_output.format.color_mode = "BW"
 
-        links.new(render_layers.outputs['Depth'], map.inputs[0])
-        links.new(map.outputs[0], depth_file_output.inputs[0])
+            # Remap as other types can not represent the full range of depth.
+            map = nodes.new(type="CompositorNodeMapValue")
+            # Size is chosen kind of arbitrarily, try out until you're satisfied with resulting depth map.
+            map.offset = [-1.0]
+            map.size = [args.depth_scale]
+            map.use_min = True
+            map.min = [0]
 
-    # create output node
-    v = nodes.new('CompositorNodeViewer')
-    v.use_alpha = False
-    # links.new(render_layers.outputs[0], v.inputs[0])  # link Image to Viewer Image RGB
-    links.new(render_layers.outputs['Depth'], v.inputs[0])  # link Z to output
+            links.new(render_layers.outputs['Depth'], map.inputs[0])
+            links.new(map.outputs[0], depth_file_output.inputs[0])
+
+        # create output node
+        v = nodes.new('CompositorNodeViewer')
+        v.use_alpha = False
+        # links.new(render_layers.outputs[0], v.inputs[0])  # link Image to Viewer Image RGB
+        links.new(render_layers.outputs['Depth'], v.inputs[0])  # link Z to output
 
     # Delete default cube
     bpy.context.active_object.select_set(True)
