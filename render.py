@@ -1,3 +1,5 @@
+import time
+
 import bpy
 from mathutils import Vector
 import os
@@ -8,9 +10,11 @@ import argparse
 import sys
 
 parser = argparse.ArgumentParser(description='Renders given folder of stl/obj meshes.')
-parser.add_argument('--mesh_dir', type=str, default='data/datasets/dmunet/STL_dataset')
-parser.add_argument('--mesh_format', type=str, default='stl')
-parser.add_argument('--render_dir', type=str, default='data/datasets/dmunet/STL_dataset_imgs_test')
+parser.add_argument('--mesh_dir', type=str,
+                    default='data/datasets/shapenet/huggingface/02801938')  # data/datasets/dmunet/STL_dataset
+parser.add_argument('--mesh_format', type=str, default='obj')  # stl
+parser.add_argument('--render_dir', type=str,
+                    default='data/datasets/shapenet/huggingface_imgs/02801938')  # data/datasets/dmunet/STL_dataset_imgs_test
 parser.add_argument('--num_views', type=int, default=20, choices=[12, 20],
                     help='number of views to be rendered')
 parser.add_argument('--overwrite', type=bool, default=False)
@@ -45,7 +49,8 @@ def main():
         sample_id = sample_path.stem
         output_folder = render_dir / sample_path.parent.relative_to(mesh_dir) / sample_id
         if not args.overwrite and os.path.isdir(output_folder) and len(
-                [x for x in os.listdir(output_folder) if x.endswith('.png')]) == args.num_views * 2:
+                [x for x in os.listdir(output_folder) if x.endswith('.png')]) == args.num_views * (
+        2 if args.render_depth else 1):
             print(f'{sample_id} already exists, skip.')
             continue
 
