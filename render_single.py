@@ -10,11 +10,11 @@ import argparse
 import sys
 
 parser = argparse.ArgumentParser(description='Renders given folder of stl/obj meshes.')
-parser.add_argument('--mesh_dir', type=str,
-                    default='data/datasets/shapenet/huggingface/02801938')  # data/datasets/dmunet/STL_dataset
+parser.add_argument('--mesh_path', type=str,
+                    default='data/datasets/shapenet/huggingface_test/02843684/1b73f96cf598ef492cba66dc6aeabcd4/models/model_normalized.obj')
 parser.add_argument('--mesh_format', type=str, default='obj')  # stl
-parser.add_argument('--render_dir', type=str,
-                    default='data/datasets/shapenet/huggingface_imgs/02801938')  # data/datasets/dmunet/STL_dataset_imgs_test
+parser.add_argument('--render_path', type=str,
+                    default='data/datasets/shapenet/huggingface_test_imgs/02843684/1b73f96cf598ef492cba66dc6aeabcd4/models/model_normalized')
 parser.add_argument('--num_views', type=int, default=20, choices=[12, 20],
                     help='number of views to be rendered')
 parser.add_argument('--overwrite', type=bool, default=False)
@@ -38,102 +38,87 @@ args = parser.parse_args(argv)
 scene = bpy.context.scene
 camera = scene.camera
 
-max_render_count = 100
-
 
 def main():
+    sample_path = Path(args.mesh_path)
+    output_folder = Path(args.render_path)
+
+    sample_id = sample_path.stem
+    print(sample_id, '...')
+    os.makedirs(output_folder, exist_ok=True)
+
     init_all()
-    render_count = 0
+    clear_mesh()
 
-    mesh_dir = Path(args.mesh_dir)
-    render_dir = Path(args.render_dir)
+    if args.mesh_format == 'obj':
+        bpy.ops.import_scene.obj(filepath=str(sample_path))
+    else:
+        assert args.mesh_format == 'stl'
+        bpy.ops.import_mesh.stl(filepath=str(sample_path))
 
-    for sample_path in sorted(mesh_dir.rglob(f'**/*.{args.mesh_format}')):
-        sample_id = sample_path.stem
-        output_folder = render_dir / sample_path.parent.relative_to(mesh_dir) / sample_id
-        if not args.overwrite and os.path.isdir(output_folder) and len(
-                [x for x in os.listdir(output_folder) if x.endswith('.png')]) == args.num_views * (
-        2 if args.render_depth else 1):
-            print(f'{sample_id} already exists, skip.')
-            continue
+    obj = bpy.context.selected_objects[0]
+    bpy.context.view_layer.objects.active = obj
 
-        if render_count >= max_render_count:
-            print('max render count reached, exit', exit(0))
-        render_count += 1
-        print(sample_id, '...')
-        os.makedirs(output_folder, exist_ok=True)
+    if args.normalize:
+        dimensions = np.asarray(obj.dimensions)
+        bbox = np.asarray(obj.bound_box)
+        scale = 1 / dimensions.max()
+        center = (bbox.max(0) + bbox.min(0)) / 2.0
+        bpy.ops.transform.resize(value=(scale, scale, scale))
+        bpy.ops.transform.translate(value=(-center[0] * scale, -center[1] * scale, -center[2] * scale))
 
-        clear_mesh()
+    # Set objekt IDs
+    obj.pass_index = 1
 
-        if args.mesh_format == 'obj':
-            bpy.ops.import_scene.obj(filepath=str(sample_path))
-        else:
-            assert args.mesh_format == 'stl'
-            bpy.ops.import_mesh.stl(filepath=str(sample_path))
+    circumradius = math.sqrt(3)
+    distance = circumradius * 1.0
+    tilt = 0.0
+    if args.num_views == 12:  # elevated circle of cameras
+        azimuths = np.linspace(0, 2 * np.pi, 12, endpoint=False)
+        elevations = np.full(12, fill_value=np.pi / 4)
+    elif args.num_views == 20:
+        azimuths, elevations = _dodecahedron(circumradius)
+    else:
+        assert False
 
-        obj = bpy.context.selected_objects[0]
-        bpy.context.view_layer.objects.active = obj
+    for view_id in range(args.num_views):
+        azimuth = azimuths[view_id]
+        elevation = elevations[view_id]
+        cam_loc = camera_location(azimuth, elevation, distance)
+        cam_rot = camera_rot_XYZEuler(azimuth, elevation, tilt)
+        scene.frame_set(view_id + 1)
+        render_path = str(output_folder / f'{sample_id}_{view_id + 1 :03d}')
+        scene.render.filepath = render_path
+        if args.render_depth:
+            scene.node_tree.nodes['File Output'].file_slots[0].path = str(output_folder / f'{sample_id}_###_depth')
 
-        if args.normalize:
-            dimensions = np.asarray(obj.dimensions)
-            bbox = np.asarray(obj.bound_box)
-            scale = 1 / dimensions.max()
-            center = (bbox.max(0) + bbox.min(0)) / 2.0
-            bpy.ops.transform.resize(value=(scale, scale, scale))
-            bpy.ops.transform.translate(value=(-center[0] * scale, -center[1] * scale, -center[2] * scale))
+        render_with_cam(cam_loc, cam_rot)
 
-        # Set objekt IDs
-        obj.pass_index = 1
+        if args.render_depth:
+            # get viewer pixels
+            depth_values = bpy.data.images['Viewer Node'].pixels
+            depth_values = np.copy(np.array(depth_values))
+            depth_values = depth_values.reshape(args.resolution, args.resolution, -1)[:, :, 0]
+            np.save(render_path + '_depth.npy', depth_values)
 
-        circumradius = math.sqrt(3)
-        distance = circumradius * 1.0
-        tilt = 0.0
-        if args.num_views == 12:  # elevated circle of cameras
-            azimuths = np.linspace(0, 2 * np.pi, 12, endpoint=False)
-            elevations = np.full(12, fill_value=np.pi / 4)
-        elif args.num_views == 20:
-            azimuths, elevations = _dodecahedron(circumradius)
-        else:
-            assert False
+        np.savez(render_path + '_camera_data.npz', **get_camera_data())
+        np.save(render_path + '_projection_matrix.npy', get_projection_matrix())
+        np.save(render_path + '_view_matrix.npy', get_view_matrix())
 
-        for view_id in range(args.num_views):
-            azimuth = azimuths[view_id]
-            elevation = elevations[view_id]
-            cam_loc = camera_location(azimuth, elevation, distance)
-            cam_rot = camera_rot_XYZEuler(azimuth, elevation, tilt)
-            scene.frame_set(view_id + 1)
-            render_path = str(output_folder / f'{sample_id}_{view_id + 1 :03d}')
-            scene.render.filepath = render_path
-            if args.render_depth:
-                scene.node_tree.nodes['File Output'].file_slots[0].path = str(output_folder / f'{sample_id}_###_depth')
-
-            render_with_cam(cam_loc, cam_rot)
-
-            if args.render_depth:
-                # get viewer pixels
-                depth_values = bpy.data.images['Viewer Node'].pixels
-                depth_values = np.copy(np.array(depth_values))
-                depth_values = depth_values.reshape(args.resolution, args.resolution, -1)[:, :, 0]
-                np.save(render_path + '_depth.npy', depth_values)
-
-            np.savez(render_path + '_camera_data.npz', **get_camera_data())
-            np.save(render_path + '_projection_matrix.npy', get_projection_matrix())
-            np.save(render_path + '_view_matrix.npy', get_view_matrix())
-
-            # # Calculate the points
-            # points = point_cloud(depth_values)
-            # # np.save(output_folder / f'{sample_id}_{view_id + 1:03d}_point_cloud.npy', points)
-            #
-            # # ----------- show point cloud in scene -------------
-            # # Translate the points
-            # verts = [camera.matrix_world @ Vector(p) for r in points for p in r]
-            # # Create a mesh from the points
-            # mesh_data = bpy.data.meshes.new("result")
-            # mesh_data.from_pydata(verts, [], [])
-            # mesh_data.update()
-            # # Create an object with this mesh
-            # obj = bpy.data.objects.new("result", mesh_data)
-            # scene.collection.objects.link(obj)
+        # # Calculate the points
+        # points = point_cloud(depth_values)
+        # # np.save(output_folder / f'{sample_id}_{view_id + 1:03d}_point_cloud.npy', points)
+        #
+        # # ----------- show point cloud in scene -------------
+        # # Translate the points
+        # verts = [camera.matrix_world @ Vector(p) for r in points for p in r]
+        # # Create a mesh from the points
+        # mesh_data = bpy.data.meshes.new("result")
+        # mesh_data.from_pydata(verts, [], [])
+        # mesh_data.update()
+        # # Create an object with this mesh
+        # obj = bpy.data.objects.new("result", mesh_data)
+        # scene.collection.objects.link(obj)
 
 
 def render_with_cam(cam_loc, cam_rot):
