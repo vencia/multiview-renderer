@@ -17,7 +17,7 @@ parser.add_argument('--render_path', type=str,
                     default='data/datasets/shapenet/huggingface_test_imgs/02843684/1b73f96cf598ef492cba66dc6aeabcd4/models/model_normalized')
 parser.add_argument('--num_views', type=int, default=20, choices=[12, 20],
                     help='number of views to be rendered')
-parser.add_argument('--overwrite', type=bool, default=False)
+# parser.add_argument('--overwrite', type=bool, default=False)
 # parser.add_argument('--fit_view', type=bool, default=False)
 parser.add_argument('--scale', type=float, default=0.4)
 parser.add_argument('--normalize', type=bool, default=True, help='Normalize object dimensions to range [-0.5,0.5]')
@@ -34,6 +34,9 @@ parser.add_argument('--engine', type=str, default='BLENDER_EEVEE',
 
 argv = sys.argv[sys.argv.index("--") + 1:]
 args = parser.parse_args(argv)
+
+bpy.context.preferences.addons['cycles'].preferences.get_devices()
+print('gpus found:', len(bpy.context.preferences.addons['cycles'].preferences.devices))
 
 scene = bpy.context.scene
 camera = scene.camera
