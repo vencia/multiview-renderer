@@ -1,2 +1,2 @@
 # NO BACKGROUND RENDERING FOR GETTING ACTUAL DEPTH VALUES!
-/home/vencia/blender-2.93.0/blender --background --python render_single.py --
+/home/vencia/blender-2.93.0/blender --background --python render_mesh.py -- --mesh_format stl --mesh_path data/datasets/dmunet/STL_dataset/ExhaustPipe/ExhaustPipe001.stl --render_path data/datasets/dmunet/STL_dataset_imgs_test/ExhaustPipe/ExhaustPipe001

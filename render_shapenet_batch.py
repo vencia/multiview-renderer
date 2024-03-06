@@ -12,7 +12,7 @@ import argparse
 
 parser = argparse.ArgumentParser(description='Renders given folder of stl/obj meshes.')
 parser.add_argument('--mesh_dir', type=str, default='data/datasets/shapenet/huggingface')
-parser.add_argument('--render_dir', type=str, default='data/datasets/shapenet/huggingface_imgs')
+parser.add_argument('--render_dir', type=str, default='data/datasets/shapenet/huggingface_imgs_test')
 parser.add_argument('--overwrite', dest='overwrite', action='store_true')
 parser.add_argument('--blender_executable', type=str, default='/home/vencia/blender-2.93.0/blender')
 parser.add_argument('--engine', type=str, default='BLENDER_EEVEE')
@@ -22,15 +22,16 @@ mesh_dir = Path(args.mesh_dir)
 render_dir = Path(args.render_dir)
 taxonomy_path = mesh_dir / 'shapenetcore_taxonomy.json'
 
-ignore = ['03001627/c5c4e6110fbbf5d3d83578ca09f86027']
+ignore = []
 
 with open(taxonomy_path, 'r') as f:
     taxonomy = json.load(f)
     num_samples_per_category = {x['metadata']['name']: x['metadata']['numInstances'] for x in taxonomy}
-    num_samples_per_category['03001627'] -= 1  # because of ignored sample
+    # num_samples_per_category['03001627'] -= 1  # because of ignored sample
+    # num_samples_per_category['02958343'] -= 1  # because of ignored sample
     num_samples_per_category['02992529'] = 831  # category is not in taxonomy
 
-for zip_file in sorted(mesh_dir.glob('*.zip')):
+for zip_file in sorted(mesh_dir.glob('02843684.zip')):
     category = zip_file.stem
     unzipped_folder = zip_file.parent / category
 
@@ -43,8 +44,8 @@ for zip_file in sorted(mesh_dir.glob('*.zip')):
         continue
 
     if os.path.isdir(unzipped_folder):
-        print(f'skip unzipped folder {unzipped_folder.stem}, already exists.')
-        continue
+        print(f'warning, unzipped folder {unzipped_folder.stem}, already exists.')
+        # continue
     else:
         with zipfile.ZipFile(zip_file, 'r') as zip_ref:
             zip_ref.extractall(zip_file.parent)
@@ -52,20 +53,28 @@ for zip_file in sorted(mesh_dir.glob('*.zip')):
     print(f'render {category} ...')
 
     for sample_path in tqdm.tqdm(unzipped_folder.iterdir()):
+        sample_id = sample_path.stem
         assert sample_path.is_dir()
         mesh_path = sample_path / 'models' / 'model_normalized.obj'
-        assert os.path.isfile(mesh_path)
-        render_path = render_dir / category / sample_path.stem / 'models' / 'model_normalized'
+        render_path = render_dir / category / sample_id / 'models' / 'model_normalized'
 
         if not args.overwrite and os.path.isfile(render_path / f'{render_path.stem}_020.png'):
-            # print(f'skip {sample_path.stem}, already rendered.')
+            # print(f'skip {sample_id}, already rendered.')
             continue
 
-        if f'{category}/{sample_path.stem}' in ignore:
-            print(f'ignore {sample_path.stem}, skip.')
+        # if os.path.isdir(render_path): # TODO: ONLY FOR PARALLEL RENDERING IN CATEGORY, REMOVE AT END AND RUN AGAIN TO CATCH ALL UNFINISHED
+        #     print(f'{sample_id} already work in progress, skip.')
+        #     continue
+
+        if f'{category}/{sample_id}' in ignore:
+            print(f'ignore {sample_id}, skip.')
             continue
 
-        # print(f'render {sample_path.stem} ...')
+        if not os.path.isfile(mesh_path):
+            print(f'warning, {sample_id} does not have model_normalized.obj, skip.')
+            continue
+
+        print(f'render {sample_id} ...')
 
         command = [
             args.blender_executable,
@@ -81,6 +90,6 @@ for zip_file in sorted(mesh_dir.glob('*.zip')):
             args.engine
         ]
 
-        subprocess.run(command, stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT)
+        subprocess.run(command) # , stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT
 
     shutil.rmtree(unzipped_folder)

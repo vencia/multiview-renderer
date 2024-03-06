@@ -19,7 +19,7 @@ parser.add_argument('--num_views', type=int, default=20, choices=[12, 20],
                     help='number of views to be rendered')
 # parser.add_argument('--overwrite', type=bool, default=False)
 # parser.add_argument('--fit_view', type=bool, default=False)
-parser.add_argument('--scale', type=float, default=0.4)
+# parser.add_argument('--scale', type=float, default=0.4)
 parser.add_argument('--normalize', type=bool, default=True, help='Normalize object dimensions to range [-0.5,0.5]')
 parser.add_argument('--render_depth', type=bool, default=False)
 parser.add_argument('--depth_scale', type=float, default=0.9,
@@ -62,13 +62,19 @@ def main():
     obj = bpy.context.selected_objects[0]
     bpy.context.view_layer.objects.active = obj
 
+    bpy.ops.object.transform_apply()  # need to apply potential scene import rotations
+
     if args.normalize:
-        dimensions = np.asarray(obj.dimensions)
         bbox = np.asarray(obj.bound_box)
-        scale = 1 / dimensions.max()
+        scale = (bbox.max(0) - bbox.min(0)).max()
         center = (bbox.max(0) + bbox.min(0)) / 2.0
-        bpy.ops.transform.resize(value=(scale, scale, scale))
-        bpy.ops.transform.translate(value=(-center[0] * scale, -center[1] * scale, -center[2] * scale))
+        bpy.ops.transform.translate(value=(-center[0], -center[1], -center[2]))
+        bpy.ops.object.transform_apply()
+        bpy.ops.transform.resize(value=(1 / scale, 1 / scale, 1 / scale))
+        bpy.ops.object.transform_apply()
+
+    print('bbox after normalization', np.asarray(obj.bound_box))
+    print('dimensions after normalization', np.asarray(obj.dimensions))
 
     # Set objekt IDs
     obj.pass_index = 1
