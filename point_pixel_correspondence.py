@@ -9,9 +9,9 @@ import argparse
 
 parser = argparse.ArgumentParser(
     description='Compute correspondence between 3d points and 2d pixels in both directions.')
-parser.add_argument('--render_dir', type=str, default='data/datasets/shapenet/huggingface_imgs_test/02843684')
-parser.add_argument('--correspondence_dir', type=str, default='data/datasets/shapenet/huggingface_imgs_correspondence_test')
-parser.add_argument('--pointcloud_dir', type=str, default='data/datasets/shapenet/huggingface_pcs/02843684')
+parser.add_argument('--render_dir', type=str, default='data/datasets/shapenet/huggingface_imgs_new/02747177')
+parser.add_argument('--correspondence_dir', type=str, default='data/datasets/shapenet/huggingface_imgs_correspondence_new')
+parser.add_argument('--pointcloud_dir', type=str, default='data/datasets/shapenet/huggingface_pcs/02747177')
 # parser.add_argument('--render_dir', type=str, default='data/datasets/dmunet/STL_dataset_imgs_test')
 # parser.add_argument('--correspondence_dir', type=str, default='data/datasets/dmunet/STL_dataset_imgs_correspondence_test')
 # parser.add_argument('--pointcloud_dir', type=str, default='data/datasets/dmunet/points_with_normals')

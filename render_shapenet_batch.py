@@ -12,7 +12,7 @@ import argparse
 
 parser = argparse.ArgumentParser(description='Renders given folder of stl/obj meshes.')
 parser.add_argument('--mesh_dir', type=str, default='data/datasets/shapenet/huggingface')
-parser.add_argument('--render_dir', type=str, default='data/datasets/shapenet/huggingface_imgs_test')
+parser.add_argument('--render_dir', type=str, default='data/datasets/shapenet/huggingface_imgs_new')
 parser.add_argument('--overwrite', dest='overwrite', action='store_true')
 parser.add_argument('--blender_executable', type=str, default='/home/vencia/blender-2.93.0/blender')
 parser.add_argument('--engine', type=str, default='BLENDER_EEVEE')
@@ -31,7 +31,7 @@ with open(taxonomy_path, 'r') as f:
     # num_samples_per_category['02958343'] -= 1  # because of ignored sample
     num_samples_per_category['02992529'] = 831  # category is not in taxonomy
 
-for zip_file in sorted(mesh_dir.glob('02843684.zip')):
+for zip_file in sorted(mesh_dir.glob('*.zip')):
     category = zip_file.stem
     unzipped_folder = zip_file.parent / category
 
@@ -44,8 +44,8 @@ for zip_file in sorted(mesh_dir.glob('02843684.zip')):
         continue
 
     if os.path.isdir(unzipped_folder):
-        print(f'warning, unzipped folder {unzipped_folder.stem}, already exists.')
-        # continue
+        print(f'warning, unzipped folder {unzipped_folder.stem}, already exists, skip.')
+        continue
     else:
         with zipfile.ZipFile(zip_file, 'r') as zip_ref:
             zip_ref.extractall(zip_file.parent)
@@ -90,6 +90,6 @@ for zip_file in sorted(mesh_dir.glob('02843684.zip')):
             args.engine
         ]
 
-        subprocess.run(command) # , stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT
+        subprocess.run(command, stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT)  #
 
     shutil.rmtree(unzipped_folder)
