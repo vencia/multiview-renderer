@@ -6,12 +6,14 @@ import trimesh
 import math
 from utils_points import plot_points
 import argparse
+from scipy.spatial.transform import Rotation
 
 parser = argparse.ArgumentParser(
     description='Compute correspondence between 3d points and 2d pixels in both directions.')
-parser.add_argument('--render_dir', type=str, default='data/datasets/shapenet/huggingface_imgs_new/02747177')
-parser.add_argument('--correspondence_dir', type=str, default='data/datasets/shapenet/huggingface_imgs_correspondence_new')
-parser.add_argument('--pointcloud_dir', type=str, default='data/datasets/shapenet/huggingface_pcs/02747177')
+parser.add_argument('--render_dir', type=str, default='data/datasets/shapenet/huggingface_imgs_new/04099429')
+parser.add_argument('--correspondence_dir', type=str,
+                    default='data/datasets/shapenet/huggingface_imgs_correspondence_new')
+parser.add_argument('--pointcloud_dir', type=str, default='data/datasets/shapenet/huggingface_pcs/04099429')
 # parser.add_argument('--render_dir', type=str, default='data/datasets/dmunet/STL_dataset_imgs_test')
 # parser.add_argument('--correspondence_dir', type=str, default='data/datasets/dmunet/STL_dataset_imgs_correspondence_test')
 # parser.add_argument('--pointcloud_dir', type=str, default='data/datasets/dmunet/points_with_normals')
@@ -28,7 +30,7 @@ def shapenet():
     pcs = np.load(pc_dir / 'points_with_normals.npy')
     sample_ids = np.load(pc_dir / 'sample_ids.npy')
 
-    for idx, sample_id in enumerate(sample_ids):
+    for idx, sample_id in enumerate(sample_ids[:3]):
         print(sample_id)
         for view_idx in range(20):
             img_path = img_dir / sample_id / f'models/model_normalized/model_normalized_{view_idx + 1:03d}.png'
@@ -38,12 +40,23 @@ def shapenet():
 
             img = Image.open(img_path).convert("RGBA")
             new_img = img.copy()
-            projection_matrix = np.load(img_path.parent / f'{img_path.stem}_projection_matrix.npy')
-            view_matrix = np.load(img_path.parent / f'{img_path.stem}_view_matrix.npy')
+            projection_mat = np.load(img_path.parent / f'{img_path.stem}_projection_matrix.npy')
+            view_mat = np.load(img_path.parent / f'{img_path.stem}_view_matrix.npy')
             points = pcs[idx, :, :3]
-            points = np.stack((points[:, 0], -points[:, 2], points[:, 1]), -1) # NEEDED BECAUSE OBJ SCENE IS IMPORTED WITH ROTATION IN BLENDER
             points = normalize(points)
-            overlay_img = pointcloud_to_image(points, projection_matrix, view_matrix)
+
+            # points = np.stack((points[:, 0], -points[:, 2], points[:, 1]),
+            #                   -1)  # NEEDED BECAUSE OBJ SCENE IS IMPORTED WITH ROTATION IN BLENDER
+
+            scene_rot_mat = np.asarray(
+                [(1, 0, 0), (0, 0, -1), (0, 1, 0)])  # NEEDED BECAUSE OBJ SCENE IS IMPORTED WITH ROTATION IN BLENDER
+
+            # with random rotation augmentation
+            rot_mat = get_random_rotation()
+            view_mat[:-1, :-1] = view_mat[:-1, :-1] @ scene_rot_mat @ rot_mat.T
+            points = points @ rot_mat.T
+
+            overlay_img = pointcloud_to_image(points, projection_mat, view_mat)
             new_img.paste(overlay_img, (0, 0), overlay_img)
             os.makedirs(projected_img_path.parent, exist_ok=True)
             new_img.save(projected_img_path)
@@ -63,12 +76,17 @@ def dmunet():
 
         img = Image.open(img_path).convert("RGBA")
         new_img = img.copy()
-        projection_matrix = np.load(img_path.parent / f'{sample_id}_projection_matrix.npy')
-        view_matrix = np.load(img_path.parent / f'{sample_id}_view_matrix.npy')
+        projection_mat = np.load(img_path.parent / f'{sample_id}_projection_matrix.npy')
+        view_mat = np.load(img_path.parent / f'{sample_id}_view_matrix.npy')
         points = np.load(pc_dir / img_path.parent.parent.stem / f'{img_path.parent.stem}.npy')[:, :3]
         points = normalize(points)
-        # points = np.stack((-points[:, 0], points[:, 2], points[:, 1]), -1)
-        overlay_img = pointcloud_to_image(points, projection_matrix, view_matrix)
+
+        # with random rotation augmentation
+        rot_mat = get_random_rotation()
+        view_mat[:-1, :-1] = view_mat[:-1, :-1] @ rot_mat.T
+        points = points @ rot_mat.T
+
+        overlay_img = pointcloud_to_image(points, projection_mat, view_mat)
         new_img.paste(overlay_img, (0, 0), overlay_img)
         os.makedirs(projected_img_path.parent, exist_ok=True)
         new_img.save(projected_img_path)
@@ -83,7 +101,7 @@ def dmunet():
 def normalize(points):
     scale = (points.max(0) - points.min(0)).max()
     center = (points.max(0) + points.min(0)) / 2.0
-    points = (points - center[None, :]) / scale
+    points = 2.0 * (points - center[None, :]) / scale
     return points
 
 
@@ -120,7 +138,7 @@ def pointcloud_to_image(points, projection_matrix, view_matrix):
 
 
 def points_to_pixels(points, projection_matrix, view_matrix):
-    points = np.concatenate([points, np.ones((len(points), 1))], -1)  # homogenize
+    points = np.concatenate([points / 2.0, np.ones((len(points), 1))], -1)  # homogenize
     projected = np.asarray([projection_matrix @ view_matrix @ x for x in points])
     projected = projected[:, :-1] / projected[:, -1, None]  # dehomogenize
     pixel_positions, z_depth = projected[:, :2], projected[:, 2]
@@ -152,6 +170,11 @@ def point_cloud(depth, camera_data):
     y = np.where(valid, factor * z * (r - (rows / 2)) / ratio, np.nan)
 
     return np.dstack((-x, -y, z))
+
+
+def get_random_rotation():
+    rot_mat = Rotation.random().as_matrix()
+    return rot_mat
 
 
 if __name__ == '__main__':

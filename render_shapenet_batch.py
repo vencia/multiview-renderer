@@ -22,12 +22,12 @@ mesh_dir = Path(args.mesh_dir)
 render_dir = Path(args.render_dir)
 taxonomy_path = mesh_dir / 'shapenetcore_taxonomy.json'
 
-ignore = []
+ignore = ['c5c4e6110fbbf5d3d83578ca09f86027']
 
 with open(taxonomy_path, 'r') as f:
     taxonomy = json.load(f)
     num_samples_per_category = {x['metadata']['name']: x['metadata']['numInstances'] for x in taxonomy}
-    # num_samples_per_category['03001627'] -= 1  # because of ignored sample
+    num_samples_per_category['03001627'] -= 1  # because of ignored sample
     # num_samples_per_category['02958343'] -= 1  # because of ignored sample
     num_samples_per_category['02992529'] = 831  # category is not in taxonomy
 
