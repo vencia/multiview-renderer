@@ -30,7 +30,7 @@ def shapenet():
     pcs = np.load(pc_dir / 'points_with_normals.npy')
     sample_ids = np.load(pc_dir / 'sample_ids.npy')
 
-    for idx, sample_id in enumerate(sample_ids[:3]):
+    for idx, sample_id in enumerate(sample_ids[:1]):
         print(sample_id)
         for view_idx in range(20):
             img_path = img_dir / sample_id / f'models/model_normalized/model_normalized_{view_idx + 1:03d}.png'
@@ -45,16 +45,15 @@ def shapenet():
             points = pcs[idx, :, :3]
             points = normalize(points)
 
-            # points = np.stack((points[:, 0], -points[:, 2], points[:, 1]),
-            #                   -1)  # NEEDED BECAUSE OBJ SCENE IS IMPORTED WITH ROTATION IN BLENDER
-
             scene_rot_mat = np.asarray(
                 [(1, 0, 0), (0, 0, -1), (0, 1, 0)])  # NEEDED BECAUSE OBJ SCENE IS IMPORTED WITH ROTATION IN BLENDER
 
             # with random rotation augmentation
             rot_mat = get_random_rotation()
-            view_mat[:-1, :-1] = view_mat[:-1, :-1] @ scene_rot_mat @ rot_mat.T
-            points = points @ rot_mat.T
+            scale_mat, scale_mat_inverse = get_random_scaling()
+
+            view_mat[:-1, :-1] = view_mat[:-1, :-1] @ scene_rot_mat @ rot_mat.T @ scale_mat_inverse
+            points = points @ rot_mat.T @ scale_mat
 
             overlay_img = pointcloud_to_image(points, projection_mat, view_mat)
             new_img.paste(overlay_img, (0, 0), overlay_img)
@@ -144,7 +143,6 @@ def points_to_pixels(points, projection_matrix, view_matrix):
     pixel_positions, z_depth = projected[:, :2], projected[:, 2]
     pixel_positions = (pixel_positions + 1.0) / 2.0  # [-1, 1] to [0, 1]
     pixel_positions[:, 1] = 1 - pixel_positions[:, 1]  # flip y axis
-    # pixel_positions[:, 0] = 1 - pixel_positions[:, 0]  # flip x axis
     pixel_positions *= args.resolution  # scale from [0,1] to image size
     pixel_positions = np.stack((pixel_positions[:, 1], pixel_positions[:, 0]), axis=-1)  # switch x and y
     return pixel_positions.astype(int), z_depth
@@ -175,6 +173,11 @@ def point_cloud(depth, camera_data):
 def get_random_rotation():
     rot_mat = Rotation.random().as_matrix()
     return rot_mat
+
+
+def get_random_scaling(scale_min=2. / 3, scale_max=3. / 2):
+    scale = np.random.rand(3) * (scale_max - scale_min) + scale_min
+    return np.identity(3) * scale, np.identity(3) * 1 / scale
 
 
 if __name__ == '__main__':
